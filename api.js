@@ -15,6 +15,14 @@ function requireAuth(req, res, next) {
 function createApi(port, client, guildId, clientId, clientSecret) {
   const app = express();
 
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, x-panel-password');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
   app.get('/check', (req, res) => {
     const { key, hwid } = req.query;
     if (!key) return res.json({ valid: false, message: 'No key provided' });
