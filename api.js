@@ -25,7 +25,6 @@ function createApi(port, client, guildId, clientId, clientSecret) {
     if (!pendingStates.has(state)) {
       return res.send('Invalid or expired authentication session. Go back to Discord and click Authenticate again.');
     }
-    pendingStates.delete(state);
 
     try {
       const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
