@@ -1,0 +1,161 @@
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require('discord.js');
+const { createKey, revokeAllForUser, revokeKey, getActiveKeys, getKeysByDiscordId, getStats } = require('./database');
+const { createApi } = require('./api');
+
+const TOKEN = process.env.DISCORD_TOKEN;
+const GUILD_ID = process.env.DISCORD_GUILD_ID;
+const API_PORT = parseInt(process.env.API_PORT || '3000');
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+  ],
+});
+
+const CHECK_INTERVAL = 5 * 60 * 1000;
+
+async function checkMemberships() {
+  console.log(`[Check] Running membership check at ${new Date().toISOString()}`);
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) {
+    console.error('[Check] Guild not found');
+    return;
+  }
+
+  const activeKeys = getActiveKeys();
+  const uniqueUsers = [...new Set(activeKeys.map(k => k.discord_id))];
+
+  let revoked = 0;
+  for (const userId of uniqueUsers) {
+    try {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) {
+        revokeAllForUser(userId);
+        revoked++;
+        console.log(`[Check] Revoked keys for user ${userId} (left server)`);
+      }
+    } catch (err) {
+      if (err.httpStatus === 10013 || err.httpStatus === 10007) {
+        revokeAllForUser(userId);
+        revoked++;
+        console.log(`[Check] Revoked keys for user ${userId} (not found)`);
+      }
+    }
+  }
+
+  const stats = getStats();
+  console.log(`[Check] Done. Revoked: ${revoked} | Active keys: ${stats.active} | Total: ${stats.total}`);
+}
+
+async function registerCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('genkey')
+      .setDescription('Generate a new key for a user')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addUserOption(opt =>
+        opt.setName('user').setDescription('User to generate key for').setRequired(true))
+      .addIntegerOption(opt =>
+        opt.setName('days').setDescription('Days until expiry (0 = never)').setDefaultValue(30)),
+    new SlashCommandBuilder()
+      .setName('revoke')
+      .setDescription('Revoke a specific key')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addStringOption(opt =>
+        opt.setName('key').setDescription('The key to revoke').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('revokeall')
+      .setDescription('Revoke all keys for a user')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addUserOption(opt =>
+        opt.setName('user').setDescription('User to revoke all keys for').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('mykey')
+      .setDescription('Show your active keys'),
+    new SlashCommandBuilder()
+      .setName('keystats')
+      .setDescription('Show key system stats')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  ];
+
+  const rest = new REST().setToken(TOKEN);
+  try {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
+      body: commands.map(c => c.toJSON()),
+    });
+    console.log('[Bot] Slash commands registered');
+  } catch (err) {
+    console.error('[Bot] Failed to register commands:', err);
+  }
+}
+
+client.on('ready', async () => {
+  console.log(`[Bot] Logged in as ${client.user.tag}`);
+  await registerCommands();
+  checkMemberships();
+  setInterval(checkMemberships, CHECK_INTERVAL);
+  console.log(`[Bot] Membership checker running every ${CHECK_INTERVAL / 1000}s`);
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const { commandName } = interaction;
+
+  if (commandName === 'genkey') {
+    const user = interaction.options.getUser('user');
+    const days = interaction.options.getInteger('days') ?? 30;
+    const key = createKey(user.id, user.username, days);
+    const expiry = days > 0 ? `Expires in ${days} days` : 'Never expires';
+
+    await interaction.reply({
+      content: `Key for <@${user.id}>:\n\`${key}\`\n${expiry}`,
+      ephemeral: true,
+    });
+  }
+
+  if (commandName === 'revoke') {
+    const key = interaction.options.getString('key');
+    const result = revokeKey(key);
+    if (result.changes > 0) {
+      await interaction.reply({ content: `Key \`${key}\` revoked.`, ephemeral: true });
+    } else {
+      await interaction.reply({ content: 'Key not found.', ephemeral: true });
+    }
+  }
+
+  if (commandName === 'revokeall') {
+    const user = interaction.options.getUser('user');
+    const result = revokeAllForUser(user.id);
+    await interaction.reply({
+      content: `Revoked ${result.changes} key(s) for <@${user.id}>.`,
+      ephemeral: true,
+    });
+  }
+
+  if (commandName === 'mykey') {
+    const keys = getKeysByDiscordId(interaction.user.id);
+    if (keys.length === 0) {
+      await interaction.reply({ content: 'You have no keys.', ephemeral: true });
+      return;
+    }
+    const list = keys.map(k => {
+      const status = k.revoked ? '❌ Revoked' : (k.expires_at && k.expires_at < Date.now() ? '⏰ Expired' : '✅ Active');
+      const expiry = k.expires_at ? new Date(k.expires_at).toLocaleDateString() : 'Never';
+      return `\`${k.key}\` — ${status} — Expires: ${expiry}`;
+    }).join('\n');
+    await interaction.reply({ content: list, ephemeral: true });
+  }
+
+  if (commandName === 'keystats') {
+    const stats = getStats();
+    await interaction.reply({
+      content: `**Key Stats**\nTotal: ${stats.total}\nActive: ${stats.active}\nRevoked: ${stats.revoked}`,
+      ephemeral: true,
+    });
+  }
+});
+
+client.login(TOKEN);
+createApi(API_PORT);
