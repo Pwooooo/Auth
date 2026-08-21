@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { createKey, revokeAllForUser, revokeKey, getActiveKeys, getKeysByDiscordId, getStats } = require('./database');
 const { createApi } = require('./api');
 
@@ -80,6 +80,12 @@ async function registerCommands() {
       .setName('keystats')
       .setDescription('Show key system stats')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+      .setName('setup')
+      .setDescription('Post the authenticate button embed to a channel')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption(opt =>
+        opt.setName('channel').setDescription('Channel to post in').setRequired(true)),
   ];
 
   const rest = new REST().setToken(TOKEN);
@@ -102,25 +108,51 @@ client.on('ready', async () => {
 });
 
 client.on('guildMemberAdd', async (member) => {
-  if (member.guild.id !== GUILD_ID) return;
-  try {
-    const existing = getKeysByDiscordId(member.id).find(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
-    if (existing) {
-      await member.send(`Welcome back! Your existing key:\n\`${existing.key}\`\nExpires: ${existing.expires_at ? new Date(existing.expires_at).toLocaleDateString() : 'Never'}`).catch(() => {});
-    } else {
-      const key = createKey(member.id, member.user.username, 30);
-      await member.send(`Welcome to Sky! Here is your key:\n\`${key}\`\nExpires in 30 days.\nKeep this key private!`).catch(() => {});
-    }
-    console.log(`[Bot] DM'd key to new member ${member.user.tag}`);
-  } catch (err) {
-    console.error(`[Bot] Failed to DM new member ${member.user.tag}:`, err.message);
-  }
+  // No auto-DM — users authenticate via the button
 });
 
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton()) {
+    if (interaction.customId === 'authenticate') {
+      const guild = client.guilds.cache.get(GUILD_ID);
+      const member = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
+      if (!member) {
+        await interaction.reply({ content: 'You must be in the server to authenticate.', ephemeral: true });
+        return;
+      }
+      const existing = getKeysByDiscordId(interaction.user.id).find(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
+      if (existing) {
+        await interaction.user.send(`Your existing key:\n\`${existing.key}\`\nExpires: ${existing.expires_at ? new Date(existing.expires_at).toLocaleDateString() : 'Never'}`).catch(() => {});
+        await interaction.reply({ content: 'Check your DMs! You already have an active key.', ephemeral: true });
+      } else {
+        const key = createKey(interaction.user.id, interaction.user.username, 30);
+        await interaction.user.send(`Your Sky key:\n\`${key}\`\nExpires in 30 days.\nKeep this key private!`).catch(() => {});
+        await interaction.reply({ content: 'Check your DMs for your key!', ephemeral: true });
+      }
+      console.log(`[Bot] Authenticated ${interaction.user.tag}`);
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
+
+  if (commandName === 'setup') {
+    const channel = interaction.options.getChannel('channel');
+    const embed = new EmbedBuilder()
+      .setTitle('Sky Auth')
+      .setDescription('Click the button below to authenticate and receive your key.')
+      .setColor(0xC8D7E6);
+    const button = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('authenticate')
+        .setLabel('Authenticate')
+        .setStyle(ButtonStyle.Primary)
+    );
+    await channel.send({ embeds: [embed], components: [button] });
+    await interaction.reply({ content: `Posted authenticate embed to <#${channel.id}>`, ephemeral: true });
+  }
 
   if (commandName === 'genkey') {
     const user = interaction.options.getUser('user');
