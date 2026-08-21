@@ -4,6 +4,7 @@ const { createApi } = require('./api');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const API_PORT = parseInt(process.env.API_PORT || '3000');
 
 const client = new Client({
@@ -107,8 +108,14 @@ client.on('ready', async () => {
   console.log(`[Bot] Membership checker running every ${CHECK_INTERVAL / 1000}s`);
 });
 
-client.on('guildMemberAdd', async (member) => {
-  // No auto-DM — users authenticate via the button
+client.on('guildMemberRemove', async (member) => {
+  if (member.guild.id !== GUILD_ID) return;
+  const keys = getKeysByDiscordId(member.id);
+  const active = keys.filter(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
+  if (active.length > 0) {
+    revokeAllForUser(member.id);
+    console.log(`[Bot] Revoked ${active.length} key(s) for ${member.user.tag} (left server)`);
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -140,17 +147,22 @@ client.on('interactionCreate', async (interaction) => {
 
   if (commandName === 'setup') {
     const channel = interaction.options.getChannel('channel');
+    const oauth2Url = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&permissions=0&integration_type=0&scope=bot+applications.commands`;
     const embed = new EmbedBuilder()
       .setTitle('Sky Auth')
-      .setDescription('Click the button below to authenticate and receive your key.')
+      .setDescription('Click **Authenticate** to authorize the bot and receive your key.\nThe bot must appear in your **Authorized Apps** for it to work.')
       .setColor(0xC8D7E6);
-    const button = new ActionRowBuilder().addComponents(
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('authenticate')
         .setLabel('Authenticate')
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setLabel('Add to Apps')
+        .setStyle(ButtonStyle.Link)
+        .setURL(oauth2Url)
     );
-    await channel.send({ embeds: [embed], components: [button] });
+    await channel.send({ embeds: [embed], components: [row] });
     await interaction.reply({ content: `Posted authenticate embed to <#${channel.id}>`, ephemeral: true });
   }
 
