@@ -59,6 +59,9 @@ async function registerCommands() {
       .addIntegerOption(opt =>
         opt.setName('days').setDescription('Days until expiry (0 = never)').setDefaultValue(30)),
     new SlashCommandBuilder()
+      .setName('getkey')
+      .setDescription('Get your personal key (must be in the server)'),
+    new SlashCommandBuilder()
       .setName('revoke')
       .setDescription('Revoke a specific key')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -146,6 +149,24 @@ client.on('interactionCreate', async (interaction) => {
       return `\`${k.key}\` — ${status} — Expires: ${expiry}`;
     }).join('\n');
     await interaction.reply({ content: list, ephemeral: true });
+  }
+
+  if (commandName === 'getkey') {
+    const guild = client.guilds.cache.get(GUILD_ID);
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) {
+      await interaction.reply({ content: 'You must be in the server to get a key.', ephemeral: true });
+      return;
+    }
+    const existing = getKeysByDiscordId(interaction.user.id).find(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
+    if (existing) {
+      await interaction.user.send(`Your existing key:\n\`${existing.key}\`\nExpires: ${existing.expires_at ? new Date(existing.expires_at).toLocaleDateString() : 'Never'}`).catch(() => {});
+      await interaction.reply({ content: 'Check your DMs! You already have an active key.', ephemeral: true });
+      return;
+    }
+    const key = createKey(interaction.user.id, interaction.user.username, 30);
+    await interaction.user.send(`Your Sky key:\n\`${key}\`\nExpires in 30 days.\nKeep this key private!`).catch(() => {});
+    await interaction.reply({ content: 'Check your DMs for your key!', ephemeral: true });
   }
 
   if (commandName === 'keystats') {
