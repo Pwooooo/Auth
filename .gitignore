@@ -1,0 +1,5 @@
+node_modules/
+keys.db
+keys.db-wal
+keys.db-shm
+.env
