@@ -13,7 +13,8 @@ db.exec(`
     created_at INTEGER NOT NULL,
     expires_at INTEGER,
     revoked INTEGER DEFAULT 0,
-    revoked_at INTEGER
+    revoked_at INTEGER,
+    hwid TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_discord_id ON keys(discord_id);
   CREATE INDEX IF NOT EXISTS idx_revoked ON keys(revoked);
@@ -50,7 +51,7 @@ function createKey(discordId, username, expiresInDays = 30) {
   return key;
 }
 
-function validateKey(key) {
+function validateKey(key, hwid) {
   const row = db.prepare(`
     SELECT * FROM keys WHERE key = ? AND revoked = 0
   `).get(key);
@@ -59,6 +60,16 @@ function validateKey(key) {
   if (row.expires_at && row.expires_at < Date.now()) {
     return { valid: false, message: 'Key has expired' };
   }
+
+  if (hwid && hwid !== 'unknown') {
+    if (row.hwid && row.hwid !== hwid) {
+      return { valid: false, message: 'Key is bound to another device' };
+    }
+    if (!row.hwid) {
+      db.prepare('UPDATE keys SET hwid = ? WHERE key = ?').run(hwid, key);
+    }
+  }
+
   return {
     valid: true,
     message: 'Key valid',
