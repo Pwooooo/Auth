@@ -1,7 +1,16 @@
 const express = require('express');
-const { validateKey, createKey, getKeysByDiscordId } = require('./database');
+const { validateKey, createKey, getKeysByDiscordId, getAllKeys, searchKeys, revokeKey, revokeAllForUser, getStats, resetHwid } = require('./database');
 
 const pendingStates = new Map();
+const PANEL_PASSWORD = process.env.PANEL_PASSWORD || 'skyadmin';
+
+function requireAuth(req, res, next) {
+  const pass = req.headers['x-panel-password'] || req.query.password;
+  if (pass !== PANEL_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 function createApi(port, client, guildId, clientId, clientSecret) {
   const app = express();
@@ -16,6 +25,46 @@ function createApi(port, client, guildId, clientId, clientSecret) {
     res.json({ status: 'ok', timestamp: Date.now() });
   });
 
+  // --- Admin API ---
+  app.get('/admin/keys', requireAuth, (req, res) => {
+    const { search } = req.query;
+    const keys = search ? searchKeys(search) : getAllKeys();
+    res.json({ keys, total: keys.length });
+  });
+
+  app.get('/admin/stats', requireAuth, (req, res) => {
+    res.json(getStats());
+  });
+
+  app.post('/admin/revoke', requireAuth, express.json(), (req, res) => {
+    const { key } = req.body;
+    if (!key) return res.status(400).json({ error: 'No key provided' });
+    const result = revokeKey(key);
+    res.json({ success: result.changes > 0 });
+  });
+
+  app.post('/admin/revokeall', requireAuth, express.json(), (req, res) => {
+    const { discord_id } = req.body;
+    if (!discord_id) return res.status(400).json({ error: 'No discord_id provided' });
+    const result = revokeAllForUser(discord_id);
+    res.json({ success: true, revoked: result.changes });
+  });
+
+  app.post('/admin/resethwid', requireAuth, express.json(), (req, res) => {
+    const { key } = req.body;
+    if (!key) return res.status(400).json({ error: 'No key provided' });
+    const result = resetHwid(key);
+    res.json({ success: result.changes > 0 });
+  });
+
+  app.get('/admin/lookup', requireAuth, (req, res) => {
+    const { discord_id } = req.query;
+    if (!discord_id) return res.status(400).json({ error: 'No discord_id provided' });
+    const keys = getKeysByDiscordId(discord_id);
+    res.json({ keys, total: keys.length });
+  });
+
+  // --- OAuth2 ---
   app.get('/oauth2/callback', async (req, res) => {
     const { code, state } = req.query;
     if (!code || !state) {
