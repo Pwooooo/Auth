@@ -33,6 +33,11 @@ function generateKey() {
 }
 
 function createKey(discordId, username, expiresInDays = 30) {
+  const existing = db.prepare(`
+    SELECT key FROM keys WHERE discord_id = ? AND revoked = 0 AND (expires_at IS NULL OR expires_at > ?)
+  `).get(discordId, Date.now());
+  if (existing) return existing.key;
+
   const key = generateKey();
   const now = Date.now();
   const expiresAt = expiresInDays ? now + expiresInDays * 86400000 : null;
