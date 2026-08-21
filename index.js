@@ -101,6 +101,22 @@ client.on('ready', async () => {
   console.log(`[Bot] Membership checker running every ${CHECK_INTERVAL / 1000}s`);
 });
 
+client.on('guildMemberAdd', async (member) => {
+  if (member.guild.id !== GUILD_ID) return;
+  try {
+    const existing = getKeysByDiscordId(member.id).find(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
+    if (existing) {
+      await member.send(`Welcome back! Your existing key:\n\`${existing.key}\`\nExpires: ${existing.expires_at ? new Date(existing.expires_at).toLocaleDateString() : 'Never'}`).catch(() => {});
+    } else {
+      const key = createKey(member.id, member.user.username, 30);
+      await member.send(`Welcome to Sky! Here is your key:\n\`${key}\`\nExpires in 30 days.\nKeep this key private!`).catch(() => {});
+    }
+    console.log(`[Bot] DM'd key to new member ${member.user.tag}`);
+  } catch (err) {
+    console.error(`[Bot] Failed to DM new member ${member.user.tag}:`, err.message);
+  }
+});
+
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
