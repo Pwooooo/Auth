@@ -106,7 +106,24 @@ function getStats() {
   const total = db.prepare('SELECT COUNT(*) as c FROM keys').get().c;
   const active = db.prepare('SELECT COUNT(*) as c FROM keys WHERE revoked = 0').get().c;
   const revoked = total - active;
-  return { total, active, revoked };
+  const hwidBound = db.prepare('SELECT COUNT(*) as c FROM keys WHERE hwid IS NOT NULL AND revoked = 0').get().c;
+  return { total, active, revoked, hwidBound };
+}
+
+function getAllKeys() {
+  return db.prepare('SELECT * FROM keys ORDER BY created_at DESC').all();
+}
+
+function searchKeys(query) {
+  const q = '%' + query + '%';
+  return db.prepare(`
+    SELECT * FROM keys WHERE key LIKE ? OR discord_id LIKE ? OR username LIKE ? OR hwid LIKE ?
+    ORDER BY created_at DESC
+  `).all(q, q, q, q);
+}
+
+function resetHwid(key) {
+  return db.prepare('UPDATE keys SET hwid = NULL WHERE key = ?').run(key);
 }
 
 module.exports = {
@@ -117,5 +134,8 @@ module.exports = {
   getActiveKeys,
   getKeysByDiscordId,
   getStats,
+  getAllKeys,
+  searchKeys,
+  resetHwid,
   generateKey,
 };
