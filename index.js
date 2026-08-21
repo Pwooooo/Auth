@@ -57,7 +57,7 @@ async function registerCommands() {
       .addUserOption(opt =>
         opt.setName('user').setDescription('User to generate key for').setRequired(true))
       .addIntegerOption(opt =>
-        opt.setName('days').setDescription('Days until expiry (0 = never)').setDefaultValue(30)),
+        opt.setName('days').setDescription('Days until expiry (0 = never)')),
     new SlashCommandBuilder()
       .setName('getkey')
       .setDescription('Get your personal key (must be in the server)'),
