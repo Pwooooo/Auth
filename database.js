@@ -1,0 +1,105 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+const crypto = require('crypto');
+
+const db = new Database(path.join(__dirname, 'keys.db'));
+
+db.pragma('journal_mode = WAL');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS keys (
+    key TEXT PRIMARY KEY,
+    discord_id TEXT NOT NULL,
+    username TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked INTEGER DEFAULT 0,
+    revoked_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_discord_id ON keys(discord_id);
+  CREATE INDEX IF NOT EXISTS idx_revoked ON keys(revoked);
+`);
+
+function generateKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const segments = [];
+  for (let s = 0; s < 4; s++) {
+    let seg = '';
+    for (let i = 0; i < 4; i++) {
+      seg += chars[crypto.randomInt(chars.length)];
+    }
+    segments.push(seg);
+  }
+  return 'SKY-' + segments.join('-');
+}
+
+function createKey(discordId, username, expiresInDays = 30) {
+  const key = generateKey();
+  const now = Date.now();
+  const expiresAt = expiresInDays ? now + expiresInDays * 86400000 : null;
+
+  db.prepare(`
+    INSERT INTO keys (key, discord_id, username, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(key, discordId, username, now, expiresAt);
+
+  return key;
+}
+
+function validateKey(key) {
+  const row = db.prepare(`
+    SELECT * FROM keys WHERE key = ? AND revoked = 0
+  `).get(key);
+
+  if (!row) return { valid: false, message: 'Invalid key' };
+  if (row.expires_at && row.expires_at < Date.now()) {
+    return { valid: false, message: 'Key has expired' };
+  }
+  return {
+    valid: true,
+    message: 'Key valid',
+    discord_id: row.discord_id,
+    username: row.username,
+  };
+}
+
+function revokeKey(key) {
+  return db.prepare(`
+    UPDATE keys SET revoked = 1, revoked_at = ? WHERE key = ?
+  `).run(Date.now(), key);
+}
+
+function revokeAllForUser(discordId) {
+  return db.prepare(`
+    UPDATE keys SET revoked = 1, revoked_at = ? WHERE discord_id = ? AND revoked = 0
+  `).run(Date.now(), discordId);
+}
+
+function getActiveKeys() {
+  return db.prepare(`
+    SELECT * FROM keys WHERE revoked = 0
+  `).all();
+}
+
+function getKeysByDiscordId(discordId) {
+  return db.prepare(`
+    SELECT * FROM keys WHERE discord_id = ? ORDER BY created_at DESC
+  `).all(discordId);
+}
+
+function getStats() {
+  const total = db.prepare('SELECT COUNT(*) as c FROM keys').get().c;
+  const active = db.prepare('SELECT COUNT(*) as c FROM keys WHERE revoked = 0').get().c;
+  const revoked = total - active;
+  return { total, active, revoked };
+}
+
+module.exports = {
+  createKey,
+  validateKey,
+  revokeKey,
+  revokeAllForUser,
+  getActiveKeys,
+  getKeysByDiscordId,
+  getStats,
+  generateKey,
+};
