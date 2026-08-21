@@ -130,7 +130,6 @@ client.on('interactionCreate', async (interaction) => {
     const channel = interaction.options.getChannel('channel');
     const state = crypto.randomBytes(16).toString('hex');
     pendingStates.set(state, true);
-    setTimeout(() => pendingStates.delete(state), 10 * 60 * 1000);
 
     const oauth2Url = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(BASE_URL + '/oauth2/callback')}&response_type=code&scope=identify&state=${state}`;
 
