@@ -7,9 +7,9 @@ function createApi(port, client, guildId, clientId, clientSecret) {
   const app = express();
 
   app.get('/check', (req, res) => {
-    const { key } = req.query;
+    const { key, hwid } = req.query;
     if (!key) return res.json({ valid: false, message: 'No key provided' });
-    return res.json(validateKey(key));
+    return res.json(validateKey(key, hwid));
   });
 
   app.get('/health', (req, res) => {
