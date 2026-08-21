@@ -1,11 +1,14 @@
 const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { createKey, revokeAllForUser, revokeKey, getActiveKeys, getKeysByDiscordId, getStats } = require('./database');
-const { createApi } = require('./api');
+const { createApi, pendingStates } = require('./api');
+const crypto = require('crypto');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const API_PORT = parseInt(process.env.API_PORT || '3000');
+const BASE_URL = process.env.BASE_URL || `https://auth-production-181a.up.railway.app`;
 
 const client = new Client({
   intents: [
@@ -119,46 +122,25 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (interaction.isButton()) {
-    if (interaction.customId === 'authenticate') {
-      const guild = client.guilds.cache.get(GUILD_ID);
-      const member = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
-      if (!member) {
-        await interaction.reply({ content: 'You must be in the server to authenticate.', ephemeral: true });
-        return;
-      }
-      const existing = getKeysByDiscordId(interaction.user.id).find(k => !k.revoked && (!k.expires_at || k.expires_at > Date.now()));
-      if (existing) {
-        await interaction.user.send(`Your existing key:\n\`${existing.key}\`\nExpires: ${existing.expires_at ? new Date(existing.expires_at).toLocaleDateString() : 'Never'}`).catch(() => {});
-        await interaction.reply({ content: 'Check your DMs! You already have an active key.', ephemeral: true });
-      } else {
-        const key = createKey(interaction.user.id, interaction.user.username, 30);
-        await interaction.user.send(`Your Sky key:\n\`${key}\`\nExpires in 30 days.\nKeep this key private!`).catch(() => {});
-        await interaction.reply({ content: 'Check your DMs for your key!', ephemeral: true });
-      }
-      console.log(`[Bot] Authenticated ${interaction.user.tag}`);
-    }
-    return;
-  }
-
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
 
   if (commandName === 'setup') {
     const channel = interaction.options.getChannel('channel');
-    const oauth2Url = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&permissions=0&integration_type=0&scope=bot+applications.commands`;
+    const state = crypto.randomBytes(16).toString('hex');
+    pendingStates.set(state, true);
+    setTimeout(() => pendingStates.delete(state), 10 * 60 * 1000);
+
+    const oauth2Url = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(BASE_URL + '/oauth2/callback')}&response_type=code&scope=identify&state=${state}`;
+
     const embed = new EmbedBuilder()
       .setTitle('Sky Auth')
-      .setDescription('Click **Authenticate** to authorize the bot and receive your key.\nThe bot must appear in your **Authorized Apps** for it to work.')
+      .setDescription('Click **Authenticate** to verify your Discord account and receive your key.')
       .setColor(0xC8D7E6);
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('authenticate')
         .setLabel('Authenticate')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setLabel('Add to Apps')
         .setStyle(ButtonStyle.Link)
         .setURL(oauth2Url)
     );
@@ -239,4 +221,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(TOKEN);
-createApi(API_PORT);
+createApi(API_PORT, client, GUILD_ID, CLIENT_ID, CLIENT_SECRET);
